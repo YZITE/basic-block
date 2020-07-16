@@ -1,4 +1,4 @@
-use crate::jump::Target as JumpTarget;
+use crate::ArenaJumpTarget as JumpTarget;
 use std::cmp;
 use std::collections::BTreeMap;
 
