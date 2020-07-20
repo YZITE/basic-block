@@ -1,5 +1,12 @@
-use std::collections::{BTreeSet, HashMap};
-use std::mem::{drop, take};
+#![cfg_attr(not(feature = "std"), no_std)]
+#![forbid(unsafe_code)]
+
+extern crate alloc;
+extern crate core;
+
+use alloc::collections::{btree_map::Entry as MapEntry, BTreeMap as Map, BTreeSet};
+use alloc::{string::String, vec::Vec};
+use core::mem::{drop, replace, take};
 
 mod helpers;
 pub mod jump;
@@ -45,14 +52,14 @@ where
 }
 
 pub type BbId = usize;
-pub type Label = std::borrow::Cow<'static, str>;
+pub type Label = alloc::borrow::Cow<'static, str>;
 type ArenaJumpTarget = BbId;
 type ABB<S, C> = BasicBlock<S, C, ArenaJumpTarget>;
 
 pub struct Arena<S, C> {
     // invariant: every pointer to another BB should be valid inside the arena.
     bbs: Vec<ABB<S, C>>,
-    labels: HashMap<String, usize>,
+    labels: Map<String, usize>,
 }
 
 impl<S, C> Default for Arena<S, C> {
@@ -60,7 +67,7 @@ impl<S, C> Default for Arena<S, C> {
     fn default() -> Self {
         Self {
             bbs: Vec::new(),
-            labels: HashMap::new(),
+            labels: Map::new(),
         }
     }
 }
@@ -111,13 +118,12 @@ impl<S, C> Arena<S, C> {
         if target >= self.bbs.len() {
             return Err(SetBbLabelError::InvalidId(target));
         }
-        use std::collections::hash_map::Entry;
         match self.labels.entry(label.into_owned()) {
-            Entry::Occupied(mut e) if overwrite => Ok(Some(std::mem::replace(e.get_mut(), target))),
-            Entry::Occupied(e) => Err(SetBbLabelError::LabelAlreadyExists {
+            MapEntry::Occupied(mut e) if overwrite => Ok(Some(replace(e.get_mut(), target))),
+            MapEntry::Occupied(e) => Err(SetBbLabelError::LabelAlreadyExists {
                 orig_target: *e.get(),
             }),
-            Entry::Vacant(e) => {
+            MapEntry::Vacant(e) => {
                 e.insert(target);
                 Ok(None)
             }
@@ -150,6 +156,8 @@ where
             self.bbs.push(bb);
             Ok(ret)
         } else {
+            errs.sort();
+            errs.dedup();
             Err((bb, OffendingIds(errs)))
         }
     }
@@ -243,17 +251,14 @@ where
             self.bbs.remove(n);
         }
 
-        self.labels.retain(|_, v| {
-            // remove all labels which either
-            if let Some(x) = trm.get(*v) {
-                if let Some(y) = x {
-                    *v = *y;
-                }
-                x.is_some()
-            } else {
-                false
-            }
-        });
+        self.labels = take(&mut self.labels)
+            .into_iter()
+            .filter(|(_, bbid)| {
+                // remove all labels which point to a BBID which should be deleted,
+                // either because it is marked in trm -> None, or the BBID is invalid.
+                trm.get(*bbid).unwrap_or(&None).is_some()
+            })
+            .collect();
 
         success
     }

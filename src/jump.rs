@@ -1,4 +1,4 @@
-use std::iter;
+use core::iter;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Conditional<C, T> {
