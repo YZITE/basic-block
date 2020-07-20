@@ -44,32 +44,6 @@ impl ReplaceLabels {
         }
         self.trm.insert(from, to);
     }
-
-    pub fn finalize(mut self) -> (Vec<Option<BbId>>, BbId) {
-        let mut offset: BbId = 0;
-        let trm2: Vec<Option<BbId>> = {
-            (0..self.max)
-                .map(|i| {
-                    if self.trm.get(&i) == Some(&None) {
-                        offset += 1;
-                        None
-                    } else {
-                        Some(i - offset)
-                    }
-                })
-                .collect()
-        };
-        for i in 0..self.max {
-            if let Some(x) = self.trm.get_mut(&i) {
-                if let Some(y) = x {
-                    *y = trm2[*y].unwrap();
-                }
-            } else {
-                self.trm.insert(i, Some(trm2[i].unwrap()));
-            }
-        }
-        (self.trm.into_iter().map(|(_, i)| i).collect(), offset)
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -307,14 +281,36 @@ where
             }
         }
         let modified = !ltr.is_empty();
-        self.replace_labels(ltr);
 
-        modified
-    }
+        // finalize ltr
+        let mut offset: BbId = 0;
+        let trm2: Vec<Option<BbId>> = {
+            (0..ltr.max)
+                .map(|i| {
+                    if ltr.trm.get(&i) == Some(&None) {
+                        offset += 1;
+                        None
+                    } else {
+                        Some(i - offset)
+                    }
+                })
+                .collect()
+        };
+        for i in 0..ltr.max {
+            if let Some(x) = ltr.trm.get_mut(&i) {
+                if let Some(y) = x {
+                    *y = trm2[*y].unwrap();
+                }
+            } else {
+                ltr.trm.insert(i, Some(trm2[i].unwrap()));
+            }
+        }
 
-    fn replace_labels(&mut self, labels: ReplaceLabels) -> bool {
-        let (trm, offset) = labels.finalize();
-        let mut success = true;
+        let trm: Vec<Option<usize>> = ltr.trm.into_iter().map(|(_, i)| i).collect();
+        let offset = offset;
+        drop(trm2);
+
+        // replace labels
 
         self.foreach_target_mut(|target: &mut usize| {
             if let Some(x) = trm.get(*target) {
@@ -324,7 +320,6 @@ where
             } else {
                 // got invalid target
                 *target -= offset;
-                success = false;
             }
         });
 
@@ -341,7 +336,7 @@ where
             })
             .collect();
 
-        success
+        modified
     }
 }
 
@@ -352,22 +347,18 @@ where
     type JumpTarget = BbId;
 
     #[inline]
-    fn foreach_target<F>(&self, mut f: F)
+    fn foreach_target<F>(&self, f: F)
     where
         F: FnMut(&Self::JumpTarget),
     {
-        for i in &self.bbs {
-            i.foreach_target(&mut f);
-        }
+        self.bbs.foreach_target(f);
     }
 
     #[inline]
-    fn foreach_target_mut<F>(&mut self, mut f: F)
+    fn foreach_target_mut<F>(&mut self, f: F)
     where
         F: FnMut(&mut Self::JumpTarget),
     {
-        for i in &mut self.bbs {
-            i.foreach_target_mut(&mut f);
-        }
+        self.bbs.foreach_target_mut(f);
     }
 }
