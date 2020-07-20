@@ -224,6 +224,7 @@ where
     /// modifications via [`Arena::bbs_mut`].
     pub fn check(&self) -> Result<(), OffendingIds> {
         let mut errs = self.check_bbs();
+        // all labels should point to a valid BbId
         errs.extend(self.labels.iter().filter_map(|(_, &i)| {
             if i >= self.bbs.len() {
                 Some((i, i))
@@ -231,6 +232,14 @@ where
                 None
             }
         }));
+        // all placeholders should have label(s)
+        for (n, i) in self.bbs.iter().enumerate() {
+            if let BasicBlockInner::Placeholder { .. } = &i.inner {
+                if !self.labels_of_bb(n).next().is_some() {
+                    errs.push((n, n));
+                }
+            }
+        }
         check_finish(errs)
     }
 
