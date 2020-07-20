@@ -1,6 +1,5 @@
 use crate::ArenaJumpTarget as JumpTarget;
-use std::cmp;
-use std::collections::BTreeMap;
+use std::{cmp, collections::BTreeMap};
 
 pub struct ReplaceLabels {
     trm: BTreeMap<JumpTarget, Option<JumpTarget>>,
@@ -59,3 +58,16 @@ impl ReplaceLabels {
         (self.trm.into_iter().map(|(_, i)| i).collect(), offset)
     }
 }
+
+#[derive(Clone, Debug, thiserror::Error)]
+pub enum SetBbLabelError {
+    #[error("got invalid basic block id {0} (out of range)")]
+    InvalidId(crate::BbId),
+
+    #[error("label already exists with target = {orig_target}")]
+    LabelAlreadyExists { orig_target: crate::BbId },
+}
+
+#[derive(Clone, Debug, thiserror::Error)]
+#[error("got offending basic block ids {0:?}")]
+pub struct OffendingIds(pub Vec<crate::BbId>);

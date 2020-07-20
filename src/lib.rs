@@ -4,11 +4,11 @@ use std::mem::{drop, take};
 mod helpers;
 pub mod jump;
 
+pub use helpers::{OffendingIds, SetBbLabelError};
 use jump::ForeachTarget;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BasicBlock<S, C, T> {
-    pub labels: Vec<String>,
     pub statements: Vec<S>,
     pub condjmp: Option<jump::Conditional<C, T>>,
     pub next: jump::Unconditional<T>,
@@ -44,7 +44,9 @@ where
     }
 }
 
-type ArenaJumpTarget = usize;
+pub type BbId = usize;
+pub type Label = std::borrow::Cow<'static, str>;
+type ArenaJumpTarget = BbId;
 type ABB<S, C> = BasicBlock<S, C, ArenaJumpTarget>;
 
 pub struct Arena<S, C> {
@@ -79,7 +81,7 @@ impl<S, C> Arena<S, C> {
         &mut self.bbs[..]
     }
 
-    pub fn labels_of_bb(&self, bbid: usize) -> impl Iterator<Item = &str> {
+    pub fn labels_of_bb(&self, bbid: BbId) -> impl Iterator<Item = &str> {
         self.labels.iter().flat_map(move |(label, &curid)| {
             if curid == bbid {
                 Some(label.as_str())
@@ -89,7 +91,7 @@ impl<S, C> Arena<S, C> {
         })
     }
 
-    pub fn label2bb(&self, label: &str) -> Option<(usize, &ABB<S, C>)> {
+    pub fn label2bb(&self, label: &str) -> Option<(BbId, &ABB<S, C>)> {
         if let Some(&bbid) = self.labels.get(label) {
             if let Some(bb) = self.bbs.get(bbid) {
                 return Some((bbid, bb));
@@ -98,9 +100,32 @@ impl<S, C> Arena<S, C> {
         None
     }
 
+    /// If this call replaced the current label->BB-ID association,
+    /// then the old associated BBID is returned.
+    pub fn set_label(
+        &mut self,
+        label: Label,
+        target: BbId,
+        overwrite: bool,
+    ) -> Result<Option<BbId>, SetBbLabelError> {
+        if target >= self.bbs.len() {
+            return Err(SetBbLabelError::InvalidId(target));
+        }
+        use std::collections::hash_map::Entry;
+        match self.labels.entry(label.into_owned()) {
+            Entry::Occupied(mut e) if overwrite => Ok(Some(std::mem::replace(e.get_mut(), target))),
+            Entry::Occupied(e) => Err(SetBbLabelError::LabelAlreadyExists {
+                orig_target: *e.get(),
+            }),
+            Entry::Vacant(e) => {
+                e.insert(target);
+                Ok(None)
+            }
+        }
+    }
+
     pub fn shrink_to_fit(&mut self) {
         for i in &mut self.bbs {
-            i.labels.shrink_to_fit();
             i.statements.shrink_to_fit();
         }
         self.bbs.shrink_to_fit();
@@ -111,6 +136,57 @@ impl<S, C> Arena<S, C>
 where
     S: ForeachTarget<JumpTarget = ArenaJumpTarget>,
 {
+    /// Returns the ID of the newly appended BB if successful,
+    /// or $bb & the invalid BbIds.
+    pub fn push(&mut self, bb: ABB<S, C>) -> Result<usize, (ABB<S, C>, OffendingIds)> {
+        let ret = self.bbs.len();
+        let mut errs = Vec::new();
+        bb.foreach_target(|&t| {
+            if t > ret {
+                errs.push(t);
+            }
+        });
+        if errs.is_empty() {
+            self.bbs.push(bb);
+            Ok(ret)
+        } else {
+            Err((bb, OffendingIds(errs)))
+        }
+    }
+
+    /// Removes the last BB, fails if any references to it exist.
+    /// If successful, returns the removed BB and all labels which referenced it.
+    /// Otherwise, returns the offending BBs (which still reference it)
+    pub fn pop(&mut self) -> Option<Result<(usize, ABB<S, C>, Vec<String>), OffendingIds>> {
+        let x = self.bbs.pop()?;
+        let retid = self.bbs.len();
+        let offending: Vec<BbId> = self
+            .bbs
+            .iter()
+            .enumerate()
+            .filter(|(_, bb)| {
+                let mut is_offending = false;
+                bb.foreach_target(|&t| {
+                    if t == retid {
+                        is_offending = true;
+                    }
+                });
+                is_offending
+            })
+            .map(|i| i.0)
+            .collect();
+        Some(if offending.is_empty() {
+            let (labelrt, rlabels) = take(&mut self.labels)
+                .into_iter()
+                .partition(|&(_, v)| v == retid);
+            self.labels = rlabels;
+            Ok((retid, x, labelrt.into_iter().map(|x| x.0).collect()))
+        } else {
+            self.bbs.push(x);
+            Err(OffendingIds(offending))
+        })
+    }
+
     pub fn optimize(&mut self) -> bool {
         let mut ltr = helpers::ReplaceLabels::new(self.bbs.len());
         let mut in_public = BTreeSet::new();

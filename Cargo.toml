@@ -7,3 +7,4 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/YZITE/basic-block"
 
 [dependencies]
+thiserror = "1.0.20"
