@@ -3,7 +3,6 @@ use crate::jump::{self, ForeachTarget};
 use crate::{BbId, Label};
 use alloc::collections::{btree_map::Entry as MapEntry, BTreeMap as Map, BTreeSet};
 use alloc::{string::String, vec::Vec};
-use core::cmp;
 use core::mem::{drop, replace, take};
 
 type ABB<S, C> = BasicBlock<S, C, BbId>;
@@ -12,38 +11,6 @@ pub struct Arena<S, C> {
     // invariant: every pointer to another BB should be valid inside the arena.
     bbs: Vec<ABB<S, C>>,
     labels: Map<String, usize>,
-}
-
-pub struct ReplaceLabels {
-    trm: Map<BbId, Option<BbId>>,
-    max: BbId,
-}
-
-impl ReplaceLabels {
-    pub fn new(max: BbId) -> Self {
-        Self {
-            trm: Map::new(),
-            max,
-        }
-    }
-
-    #[inline]
-    pub fn is_empty(&self) -> bool {
-        self.trm.is_empty()
-    }
-
-    pub fn mark(&mut self, from: BbId, to: Option<BbId>) {
-        self.max = cmp::max(self.max, from);
-        if let Some(x) = to {
-            self.max = cmp::max(self.max, x);
-        }
-        if let Some(to2) = to {
-            if from == to2 {
-                return;
-            }
-        }
-        self.trm.insert(from, to);
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -244,8 +211,25 @@ where
     }
 
     pub fn optimize(&mut self) -> bool {
-        let mut ltr = ReplaceLabels::new(self.bbs.len());
-        let mut new_in_use = Vec::with_capacity(self.bbs.len());
+        let mut max = self.bbs.len();
+        let mut trm = Map::new();
+        let mut new_in_use = Vec::with_capacity(max);
+
+        let mut mark = |from: BbId, to: Option<BbId>| {
+            if max < from {
+                max = from;
+            }
+            if let Some(to2) = to {
+                if from == to2 {
+                    return;
+                }
+                if max < to2 {
+                    max = to2;
+                }
+            }
+            trm.insert(from, to);
+        };
+
         for (n, i) in self.bbs.iter().enumerate() {
             if i.is_public {
                 new_in_use.push(n);
@@ -256,14 +240,14 @@ where
             } = &i.inner
             {
                 if statements.is_empty() && condjmp.is_none() {
-                    if let jump::Unconditional::Jump(trg) = next {
-                        ltr.mark(n, Some(*trg));
+                    if let jump::Unconditional::Jump(trg) = *next {
+                        mark(n, Some(trg));
                     }
                 }
             }
         }
 
-        // recursively mark anything as in-use only if unreachable from in-use or pub
+        // recursively mark anything as in-use only if reachable from in-use or pub
         let mut in_use = BTreeSet::new();
         while !new_in_use.is_empty() {
             for i in take(&mut new_in_use) {
@@ -275,47 +259,40 @@ where
         }
         drop(new_in_use);
 
+        let mut offset: BbId = 0;
         for i in 0..self.bbs.len() {
             if !in_use.contains(&i) {
-                ltr.mark(i, None);
+                mark(i, None);
+                offset += 1;
             }
         }
-        let modified = !ltr.is_empty();
+        let modified = !trm.is_empty();
 
-        // finalize ltr
-        let mut offset: BbId = 0;
-        let trm2: Vec<Option<BbId>> = {
-            (0..ltr.max)
-                .map(|i| {
-                    if ltr.trm.get(&i) == Some(&None) {
-                        offset += 1;
-                        None
-                    } else {
-                        Some(i - offset)
-                    }
-                })
-                .collect()
-        };
-        for i in 0..ltr.max {
-            if let Some(x) = ltr.trm.get_mut(&i) {
-                if let Some(y) = x {
-                    *y = trm2[*y].unwrap();
-                }
-            } else {
-                ltr.trm.insert(i, Some(trm2[i].unwrap()));
+        // finalize trm
+        for i in 0..max {
+            if let &mut Some(x) = trm.entry(i).or_insert(Some(i)) {
+                *trm.get_mut(&i).unwrap().as_mut().unwrap() -=
+                    trm.iter().take(x).filter(|&(_, j)| j.is_none()).count();
             }
         }
 
-        let trm: Vec<Option<usize>> = ltr.trm.into_iter().map(|(_, i)| i).collect();
+        let trm_get = |n: usize| trm.get(&n).copied();
         let offset = offset;
-        drop(trm2);
 
-        // replace labels
+        // remove to-be-removed BBs
+        for (&n, i) in trm.iter().rev() {
+            if i.is_none() {
+                self.bbs.remove(n);
+            }
+        }
 
+        // replace jump targets
         self.foreach_target_mut(|target: &mut usize| {
-            if let Some(x) = trm.get(*target) {
+            if let Some(x) = trm_get(*target) {
                 if let Some(y) = x {
-                    *target = *y;
+                    *target = y;
+                } else {
+                    unreachable!();
                 }
             } else {
                 // got invalid target
@@ -323,16 +300,12 @@ where
             }
         });
 
-        for (n, _) in trm.iter().enumerate().rev().filter(|(_, i)| i.is_none()) {
-            self.bbs.remove(n);
-        }
-
         self.labels = take(&mut self.labels)
             .into_iter()
-            .filter(|(_, bbid)| {
+            .filter(|&(_, bbid)| {
                 // remove all labels which point to a BBID which should be deleted,
                 // either because it is marked in trm -> None, or the BBID is invalid.
-                trm.get(*bbid).unwrap_or(&None).is_some()
+                trm_get(bbid).unwrap_or(None).is_some()
             })
             .collect();
 
