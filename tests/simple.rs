@@ -4,7 +4,7 @@ use yz_basic_block::{
     Arena, BasicBlock, BasicBlockInner,
 };
 
-type DummyArena = Arena<Dummy<usize>, ()>;
+type DummyArena = Arena<Dummy<usize>, Dummy<usize>>;
 
 #[test]
 fn bb0() {

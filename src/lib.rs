@@ -18,7 +18,7 @@ use jump::ForeachTarget;
 pub enum BasicBlockInner<S, C, T> {
     Concrete {
         statements: Vec<S>,
-        condjmp: Option<jump::Conditional<C, T>>,
+        condjmp: Option<C>,
         next: jump::Unconditional<T>,
     },
     /// placeholder for linker references to other files
@@ -34,6 +34,7 @@ pub struct BasicBlock<S, C, T> {
 impl<S, C, T> ForeachTarget for BasicBlockInner<S, C, T>
 where
     S: ForeachTarget<JumpTarget = T>,
+    C: ForeachTarget<JumpTarget = T>,
 {
     type JumpTarget = T;
 
@@ -73,6 +74,7 @@ where
 impl<S, C, T> ForeachTarget for BasicBlock<S, C, T>
 where
     S: ForeachTarget<JumpTarget = T>,
+    C: ForeachTarget<JumpTarget = T>,
 {
     type JumpTarget = T;
 
@@ -195,7 +197,7 @@ fn check_finish(mut offending: Vec<(BbId, BbId)>) -> Result<(), OffendingIds> {
 
 impl<S, C> Arena<S, C>
 where
-    S: ForeachTarget<JumpTarget = ArenaJumpTarget>,
+    ABB<S, C>: ForeachTarget<JumpTarget = ArenaJumpTarget>,
 {
     fn check_intern(
         &self,

@@ -1,11 +1,5 @@
 use core::iter;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Conditional<C, T> {
-    pub target: T,
-    pub condition: C,
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Unconditional<T> {
     Halt,
@@ -44,26 +38,6 @@ impl<T> ForeachTarget for Dummy<T> {
     where
         F: FnMut(&mut Self::JumpTarget),
     {
-    }
-}
-
-impl<C, T> ForeachTarget for Conditional<C, T> {
-    type JumpTarget = T;
-
-    #[inline]
-    fn foreach_target<F>(&self, mut f: F)
-    where
-        F: FnMut(&Self::JumpTarget),
-    {
-        f(&self.target);
-    }
-
-    #[inline]
-    fn foreach_target_mut<F>(&mut self, mut f: F)
-    where
-        F: FnMut(&mut Self::JumpTarget),
-    {
-        f(&mut self.target)
     }
 }
 
