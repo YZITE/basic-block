@@ -15,14 +15,23 @@ pub use helpers::{OffendingIds, SetBbLabelError};
 use jump::ForeachTarget;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub enum BasicBlockInner<S, C, T> {
+    Concrete {
+        statements: Vec<S>,
+        condjmp: Option<jump::Conditional<C, T>>,
+        next: jump::Unconditional<T>,
+    },
+    /// placeholder for linker references to other files
+    Placeholder { is_extern: bool },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BasicBlock<S, C, T> {
-    pub statements: Vec<S>,
-    pub condjmp: Option<jump::Conditional<C, T>>,
-    pub next: jump::Unconditional<T>,
+    pub inner: BasicBlockInner<S, C, T>,
     pub is_public: bool,
 }
 
-impl<S, C, T> ForeachTarget for BasicBlock<S, C, T>
+impl<S, C, T> ForeachTarget for BasicBlockInner<S, C, T>
 where
     S: ForeachTarget<JumpTarget = T>,
 {
@@ -32,22 +41,55 @@ where
     where
         F: FnMut(&Self::JumpTarget),
     {
-        for i in self.statements.iter() {
-            i.foreach_target(&mut f);
+        if let BasicBlockInner::Concrete {
+            statements,
+            condjmp,
+            next,
+        } = self
+        {
+            statements.foreach_target(&mut f);
+            condjmp.foreach_target(&mut f);
+            next.foreach_target(f);
         }
-        self.condjmp.foreach_target(&mut f);
-        self.next.foreach_target(f);
     }
 
     fn foreach_target_mut<F>(&mut self, mut f: F)
     where
         F: FnMut(&mut Self::JumpTarget),
     {
-        for i in self.statements.iter_mut() {
-            i.foreach_target_mut(&mut f);
+        if let BasicBlockInner::Concrete {
+            statements,
+            condjmp,
+            next,
+        } = self
+        {
+            statements.foreach_target_mut(&mut f);
+            condjmp.foreach_target_mut(&mut f);
+            next.foreach_target_mut(f);
         }
-        self.condjmp.foreach_target_mut(&mut f);
-        self.next.foreach_target_mut(f);
+    }
+}
+
+impl<S, C, T> ForeachTarget for BasicBlock<S, C, T>
+where
+    S: ForeachTarget<JumpTarget = T>,
+{
+    type JumpTarget = T;
+
+    #[inline]
+    fn foreach_target<F>(&self, f: F)
+    where
+        F: FnMut(&Self::JumpTarget),
+    {
+        self.inner.foreach_target(f);
+    }
+
+    #[inline]
+    fn foreach_target_mut<F>(&mut self, f: F)
+    where
+        F: FnMut(&mut Self::JumpTarget),
+    {
+        self.inner.foreach_target_mut(f);
     }
 }
 
@@ -132,9 +174,22 @@ impl<S, C> Arena<S, C> {
 
     pub fn shrink_to_fit(&mut self) {
         for i in &mut self.bbs {
-            i.statements.shrink_to_fit();
+            if let BasicBlockInner::Concrete { statements, .. } = &mut i.inner {
+                statements.shrink_to_fit();
+            }
         }
         self.bbs.shrink_to_fit();
+    }
+}
+
+fn check_finish(mut offending: Vec<BbId>) -> Result<(), OffendingIds> {
+    if offending.is_empty() {
+        Ok(())
+    } else {
+        offending.sort();
+        offending.dedup();
+        offending.shrink_to_fit();
+        Err(OffendingIds(offending))
     }
 }
 
@@ -142,23 +197,44 @@ impl<S, C> Arena<S, C>
 where
     S: ForeachTarget<JumpTarget = ArenaJumpTarget>,
 {
+    fn check_intern(&self, bb: &ABB<S, C>, allow_new: bool, offending: &mut Vec<BbId>) {
+        let endid = self.bbs.len() + if allow_new { 1 } else { 0 };
+        bb.foreach_target(|&t| {
+            if t >= endid {
+                offending.push(t);
+            }
+        });
+    }
+
+    /// Use this method to re-check all references in the `Arena` after
+    /// modifications via [`Arena::bbs_mut`].
+    pub fn check(&self) -> Result<(), OffendingIds> {
+        let mut errs = Vec::new();
+        for i in &self.bbs {
+            self.check_intern(i, false, &mut errs);
+        }
+        errs.extend(self.labels.iter().filter_map(|(_, &i)| {
+            if i >= self.bbs.len() {
+                Some(i)
+            } else {
+                None
+            }
+        }));
+        check_finish(errs)
+    }
+
     /// Returns the ID of the newly appended BB if successful,
     /// or $bb & the invalid BbIds.
     pub fn push(&mut self, bb: ABB<S, C>) -> Result<usize, (ABB<S, C>, OffendingIds)> {
-        let ret = self.bbs.len();
         let mut errs = Vec::new();
-        bb.foreach_target(|&t| {
-            if t > ret {
-                errs.push(t);
+        self.check_intern(&bb, true, &mut errs);
+        match check_finish(errs) {
+            Ok(()) => {
+                let ret = self.bbs.len();
+                self.bbs.push(bb);
+                Ok(ret)
             }
-        });
-        if errs.is_empty() {
-            self.bbs.push(bb);
-            Ok(ret)
-        } else {
-            errs.sort();
-            errs.dedup();
-            Err((bb, OffendingIds(errs)))
+            Err(errs) => Err((bb, errs)),
         }
     }
 
@@ -201,9 +277,16 @@ where
         for (n, i) in self.bbs.iter().enumerate() {
             if i.is_public {
                 new_in_use.push(n);
-            } else if i.statements.is_empty() && i.condjmp.is_none() {
-                if let jump::Unconditional::Jump(trg) = i.next {
-                    ltr.mark(n, Some(trg));
+            } else if let BasicBlockInner::Concrete {
+                statements,
+                condjmp,
+                next,
+            } = &i.inner
+            {
+                if statements.is_empty() && condjmp.is_none() {
+                    if let jump::Unconditional::Jump(trg) = next {
+                        ltr.mark(n, Some(*trg));
+                    }
                 }
             }
         }
