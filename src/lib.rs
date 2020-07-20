@@ -182,7 +182,7 @@ impl<S, C> Arena<S, C> {
     }
 }
 
-fn check_finish(mut offending: Vec<BbId>) -> Result<(), OffendingIds> {
+fn check_finish(mut offending: Vec<(BbId, BbId)>) -> Result<(), OffendingIds> {
     if offending.is_empty() {
         Ok(())
     } else {
@@ -197,25 +197,36 @@ impl<S, C> Arena<S, C>
 where
     S: ForeachTarget<JumpTarget = ArenaJumpTarget>,
 {
-    fn check_intern(&self, bb: &ABB<S, C>, allow_new: bool, offending: &mut Vec<BbId>) {
+    fn check_intern(
+        &self,
+        bbid: BbId,
+        bb: &ABB<S, C>,
+        allow_new: bool,
+        offending: &mut Vec<(BbId, BbId)>,
+    ) {
         let endid = self.bbs.len() + if allow_new { 1 } else { 0 };
         bb.foreach_target(|&t| {
             if t >= endid {
-                offending.push(t);
+                offending.push((bbid, t));
             }
         });
+    }
+
+    fn check_bbs(&self) -> Vec<(BbId, BbId)> {
+        let mut errs = Vec::new();
+        for (n, i) in self.bbs.iter().enumerate() {
+            self.check_intern(n, i, false, &mut errs);
+        }
+        errs
     }
 
     /// Use this method to re-check all references in the `Arena` after
     /// modifications via [`Arena::bbs_mut`].
     pub fn check(&self) -> Result<(), OffendingIds> {
-        let mut errs = Vec::new();
-        for i in &self.bbs {
-            self.check_intern(i, false, &mut errs);
-        }
+        let mut errs = self.check_bbs();
         errs.extend(self.labels.iter().filter_map(|(_, &i)| {
             if i >= self.bbs.len() {
-                Some(i)
+                Some((i, i))
             } else {
                 None
             }
@@ -226,11 +237,11 @@ where
     /// Returns the ID of the newly appended BB if successful,
     /// or $bb & the invalid BbIds.
     pub fn push(&mut self, bb: ABB<S, C>) -> Result<usize, (ABB<S, C>, OffendingIds)> {
+        let ret = self.bbs.len();
         let mut errs = Vec::new();
-        self.check_intern(&bb, true, &mut errs);
+        self.check_intern(ret, &bb, true, &mut errs);
         match check_finish(errs) {
             Ok(()) => {
-                let ret = self.bbs.len();
                 self.bbs.push(bb);
                 Ok(ret)
             }
@@ -243,23 +254,9 @@ where
     /// Otherwise, returns the offending BBs (which still reference it)
     pub fn pop(&mut self) -> Option<Result<(usize, ABB<S, C>, Vec<String>), OffendingIds>> {
         let x = self.bbs.pop()?;
-        let retid = self.bbs.len();
-        let offending: Vec<BbId> = self
-            .bbs
-            .iter()
-            .enumerate()
-            .filter(|(_, bb)| {
-                let mut is_offending = false;
-                bb.foreach_target(|&t| {
-                    if t == retid {
-                        is_offending = true;
-                    }
-                });
-                is_offending
-            })
-            .map(|i| i.0)
-            .collect();
+        let offending = self.check_bbs();
         Some(if offending.is_empty() {
+            let retid = self.bbs.len();
             let (labelrt, rlabels) = take(&mut self.labels)
                 .into_iter()
                 .partition(|&(_, v)| v == retid);

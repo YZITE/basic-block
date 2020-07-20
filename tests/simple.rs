@@ -49,3 +49,64 @@ fn bb1() {
     assert_eq!(arena.bbs().len(), 0);
     assert!(arena.check().is_ok());
 }
+
+#[test]
+fn bb_pop() {
+    let mut arena = DummyArena::new();
+    let pr = arena.push(BasicBlock {
+        inner: BasicBlockInner::Concrete {
+            statements: Vec::new(),
+            condjmp: None,
+            next: Unconditional::Halt,
+        },
+        is_public: true,
+    });
+    assert!(pr.is_ok());
+    assert!(arena.set_label("main".into(), pr.unwrap(), false).is_ok());
+    if let Some(Ok(_)) = arena.pop() {
+        // do nothing
+    } else {
+        unreachable!();
+    }
+}
+
+#[test]
+fn bb_keep() {
+    let mut arena = DummyArena::new();
+
+    let pr = arena.push(BasicBlock {
+        inner: BasicBlockInner::Concrete {
+            statements: Vec::new(),
+            condjmp: None,
+            next: Unconditional::Halt,
+        },
+        is_public: true,
+    });
+    assert!(pr.is_ok());
+    assert!(arena.set_label("main".into(), pr.unwrap(), false).is_ok());
+
+    let pr = arena.push(BasicBlock {
+        inner: BasicBlockInner::Concrete {
+            statements: Vec::new(),
+            condjmp: None,
+            next: Unconditional::Halt,
+        },
+        is_public: false,
+    });
+    assert!(pr.is_ok());
+
+    if let BasicBlockInner::Concrete { next, .. } = &mut arena.bbs_mut()[0].inner {
+        // link both BBs together
+        *next = Unconditional::Jump(1);
+    }
+    assert!(arena.check().is_ok());
+
+    // .pop should fail
+    assert_eq!(arena.pop().unwrap().unwrap_err().0, &[(0, 1)]);
+
+    // optimize should keep it
+    arena.optimize();
+    assert_eq!(arena.bbs().len(), 2);
+
+    assert!(arena.check().is_ok());
+}
