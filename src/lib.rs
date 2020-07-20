@@ -189,10 +189,10 @@ where
 
     pub fn optimize(&mut self) -> bool {
         let mut ltr = helpers::ReplaceLabels::new(self.bbs.len());
-        let mut in_public = BTreeSet::new();
+        let mut new_in_use = Vec::with_capacity(self.bbs.len());
         for (n, i) in self.bbs.iter().enumerate() {
             if i.is_public {
-                in_public.insert(n);
+                new_in_use.push(n);
             } else if i.statements.is_empty() && i.condjmp.is_none() {
                 if let jump::Unconditional::Jump(trg) = i.next {
                     ltr.mark(n, Some(trg));
@@ -202,17 +202,13 @@ where
 
         // recursively mark anything as in-use only if unreachable from in-use or pub
         let mut in_use = BTreeSet::new();
-        let mut new_in_use = in_public;
         while !new_in_use.is_empty() {
-            let mut old_in_use = take(&mut new_in_use);
-
-            for &i in old_in_use.iter() {
-                self.bbs[i].foreach_target(|trg| {
-                    new_in_use.insert(*trg);
-                });
+            for i in take(&mut new_in_use) {
+                if in_use.insert(i) {
+                    // really new entry
+                    self.bbs[i].foreach_target(|&trg| new_in_use.push(trg));
+                }
             }
-
-            in_use.append(&mut old_in_use);
         }
         drop(new_in_use);
 
