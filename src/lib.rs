@@ -78,7 +78,7 @@ where
 {
     type JumpTarget = T;
 
-    #[inline]
+    #[inline(always)]
     fn foreach_target<F>(&self, f: F)
     where
         F: FnMut(&Self::JumpTarget),
@@ -86,7 +86,7 @@ where
         self.inner.foreach_target(f);
     }
 
-    #[inline]
+    #[inline(always)]
     fn foreach_target_mut<F>(&mut self, f: F)
     where
         F: FnMut(&mut Self::JumpTarget),
@@ -117,17 +117,17 @@ impl<S, C> Default for Arena<S, C> {
 }
 
 impl<S, C> Arena<S, C> {
-    #[inline]
+    #[inline(always)]
     pub fn new() -> Self {
         Default::default()
     }
 
-    #[inline]
+    #[inline(always)]
     pub fn bbs(&self) -> &[ABB<S, C>] {
         &self.bbs[..]
     }
 
-    #[inline]
+    #[inline(always)]
     pub fn bbs_mut(&mut self) -> &mut [ABB<S, C>] {
         &mut self.bbs[..]
     }
