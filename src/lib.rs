@@ -15,9 +15,9 @@ pub struct BasicBlock<S, C, T> {
     pub is_public: bool,
 }
 
-impl<S, C, T> jump::ForeachTarget for BasicBlock<S, C, T>
+impl<S, C, T> ForeachTarget for BasicBlock<S, C, T>
 where
-    S: jump::ForeachTarget<JumpTarget = T>,
+    S: ForeachTarget<JumpTarget = T>,
 {
     type JumpTarget = T;
 
@@ -109,7 +109,7 @@ impl<S, C> Arena<S, C> {
 
 impl<S, C> Arena<S, C>
 where
-    S: jump::ForeachTarget<JumpTarget = ArenaJumpTarget>,
+    S: ForeachTarget<JumpTarget = ArenaJumpTarget>,
 {
     pub fn optimize(&mut self) -> bool {
         let mut ltr = helpers::ReplaceLabels::new(self.bbs.len());
@@ -187,9 +187,9 @@ where
     }
 }
 
-impl<S, C> jump::ForeachTarget for Arena<S, C>
+impl<S, C> ForeachTarget for Arena<S, C>
 where
-    ABB<S, C>: jump::ForeachTarget<JumpTarget = ArenaJumpTarget>,
+    ABB<S, C>: ForeachTarget<JumpTarget = ArenaJumpTarget>,
 {
     type JumpTarget = ArenaJumpTarget;
 
