@@ -1,18 +1,21 @@
 use std::iter;
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Conditional<C, T> {
     pub target: T,
     pub condition: C,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Unconditional<T> {
     Halt,
     Jump(T),
     Return,
     Unknown,
 }
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct Dummy<T>(pub core::marker::PhantomData<T>);
 
 pub trait ForeachTarget {
     type JumpTarget;
@@ -24,6 +27,24 @@ pub trait ForeachTarget {
     fn foreach_target_mut<F>(&mut self, f: F)
     where
         F: FnMut(&mut Self::JumpTarget);
+}
+
+impl<T> ForeachTarget for Dummy<T> {
+    type JumpTarget = T;
+
+    #[inline]
+    fn foreach_target<F>(&self, _f: F)
+    where
+        F: FnMut(&Self::JumpTarget),
+    {
+    }
+
+    #[inline]
+    fn foreach_target_mut<F>(&mut self, _f: F)
+    where
+        F: FnMut(&mut Self::JumpTarget),
+    {
+    }
 }
 
 impl<C, T> ForeachTarget for Conditional<C, T> {

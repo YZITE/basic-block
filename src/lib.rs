@@ -6,6 +6,7 @@ pub mod jump;
 
 use jump::ForeachTarget;
 
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BasicBlock<S, C, T> {
     pub labels: Vec<String>,
     pub statements: Vec<S>,
