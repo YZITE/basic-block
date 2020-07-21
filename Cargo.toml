@@ -1,5 +1,6 @@
 [package]
 name = "yz-basic-block"
+description = "a simple Basic Block framework + optimizer"
 version = "0.0.0"
 authors = ["Erik Zscheile <zseri.devel@ytrizja.de>"]
 edition = "2018"
