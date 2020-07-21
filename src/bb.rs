@@ -12,6 +12,33 @@ pub enum BasicBlockInner<S, C, T> {
     Placeholder { is_extern: bool },
 }
 
+impl<S, C, T> Default for BasicBlockInner<S, C, T> {
+    #[inline]
+    fn default() -> Self {
+        Self::Placeholder { is_extern: false }
+    }
+}
+
+impl<S, C, T> BasicBlockInner<S, C, T> {
+    #[inline]
+    pub fn is_concrete(&self) -> bool {
+        if let Self::Concrete { .. } = self {
+            true
+        } else {
+            false
+        }
+    }
+
+    #[inline]
+    pub fn is_placeholder(&self) -> bool {
+        if let Self::Placeholder { .. } = self {
+            true
+        } else {
+            false
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BasicBlock<S, C, T> {
     pub inner: BasicBlockInner<S, C, T>,

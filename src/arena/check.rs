@@ -52,10 +52,8 @@ where
         }));
         // all placeholders should have label(s)
         for (n, i) in self.bbs.iter().enumerate() {
-            if let BasicBlockInner::Placeholder { .. } = &i.inner {
-                if self.labels_of_bb(n).next().is_none() {
-                    errs.push((n, n));
-                }
+            if i.inner.is_placeholder() && self.labels_of_bb(n).next().is_none() {
+                errs.push((n, n));
             }
         }
         check_finish(errs)

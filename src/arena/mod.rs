@@ -10,6 +10,7 @@ mod optimize;
 
 type ABB<S, C> = BasicBlock<S, C, BbId>;
 
+#[derive(Debug)]
 pub struct Arena<S, C> {
     // invariant: every pointer to another BB should be valid inside the arena.
     bbs: Vec<ABB<S, C>>,
