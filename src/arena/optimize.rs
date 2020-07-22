@@ -52,6 +52,20 @@ impl TransInfo {
     }
 }
 
+/// check function which makes sure that no reference to $exclude exists
+/// inside of $container.
+fn fetchk<C>(is_mergable: &mut bool, container: &C, exclude: <C as ForeachTarget>::JumpTarget)
+where
+    C: ForeachTarget,
+    C::JumpTarget: Copy + PartialEq,
+{
+    container.foreach_target(move |&t| {
+        if exclude == t {
+            *is_mergable = false;
+        }
+    });
+}
+
 impl<S, C> Arena<S, C>
 where
     S: ForeachTarget<JumpTarget = BbId>,
@@ -115,6 +129,10 @@ where
             if bbheadref == n {
                 continue;
             }
+            if trm.get(&bbheadref).map(|hti| hti.target != bbheadref) == Some(true) {
+                // head is already redirected, skip
+                continue;
+            }
             let mut is_mergable = false;
             if let Some(bbhead) = self.bbs.get_mut(bbheadref) {
                 if let BasicBlockInner::Concrete {
@@ -124,12 +142,9 @@ where
                 } = &mut bbhead.inner
                 {
                     is_mergable = condjmp.is_none() && *next == jump::Unconditional::Jump(n);
+
                     // make sure that we don't have any additional references to bbtail
-                    (*statements).foreach_target(|&t| {
-                        if t == n {
-                            is_mergable = false;
-                        }
-                    });
+                    fetchk(&mut is_mergable, statements, n);
                 }
             }
             if !is_mergable {
@@ -139,7 +154,10 @@ where
                 if bbtail.is_public || !bbtail.inner.is_concrete() {
                     continue;
                 }
-                bbtail.foreach_target(|&t| assert_ne!(n, t));
+                fetchk(&mut is_mergable, bbtail, n);
+                if !is_mergable {
+                    continue;
+                }
                 take(&mut bbtail.inner)
             } else {
                 continue;
@@ -159,6 +177,15 @@ where
                 } = &mut self.bbs.get_mut(bbheadref).unwrap().inner
                 {
                     in_use.remove(&n);
+                    if h_statements.is_empty() {
+                        // this normally only happens if $head.is_public
+                        // merge labels manually
+                        for (_, ltrg) in self.labels.iter_mut() {
+                            if *ltrg == n {
+                                *ltrg = bbheadref;
+                            }
+                        }
+                    }
                     h_statements.append(&mut statements);
                     *h_condjmp = condjmp;
                     *h_next = next;
