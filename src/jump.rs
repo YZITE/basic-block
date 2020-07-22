@@ -1,6 +1,10 @@
 use core::iter;
 
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
 pub enum Unconditional<T> {
     Halt,
     Jump(T),
@@ -9,6 +13,7 @@ pub enum Unconditional<T> {
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
 pub struct Dummy<T>(pub core::marker::PhantomData<T>);
 
 pub trait ForeachTarget {

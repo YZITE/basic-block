@@ -1,7 +1,11 @@
 use crate::jump::{self, ForeachTarget};
 use alloc::vec::Vec;
 
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
 pub enum BasicBlockInner<S, C, T> {
     Concrete {
         statements: Vec<S>,
@@ -40,7 +44,9 @@ impl<S, C, T> BasicBlockInner<S, C, T> {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
 pub struct BasicBlock<S, C, T> {
+    #[cfg_attr(feature = "serde", serde(flatten))]
     pub inner: BasicBlockInner<S, C, T>,
     pub is_public: bool,
 }

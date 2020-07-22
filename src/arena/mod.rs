@@ -5,12 +5,16 @@ use alloc::collections::{btree_map::Entry as MapEntry, BTreeMap as Map};
 use alloc::{string::String, vec::Vec};
 use core::mem::{replace, take};
 
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
 mod check;
 mod optimize;
 
 type ABB<S, C> = BasicBlock<S, C, BbId>;
 
 #[derive(Debug)]
+#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
 pub struct Arena<S, C> {
     // invariant: every pointer to another BB should be valid inside the arena.
     bbs: Vec<ABB<S, C>>,
@@ -19,6 +23,7 @@ pub struct Arena<S, C> {
 
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "std", derive(thiserror::Error))]
+#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
 pub enum SetBbLabelError {
     #[cfg_attr(
         feature = "std",
@@ -39,6 +44,7 @@ pub enum SetBbLabelError {
     feature = "std",
     error("got offending basic block ids (from -> to) {0:?}")
 )]
+#[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
 pub struct OffendingIds(pub Vec<(BbId, BbId)>);
 
 impl<S, C> Default for Arena<S, C> {
@@ -65,6 +71,11 @@ impl<S, C> Arena<S, C> {
     #[inline(always)]
     pub fn bbs_mut(&mut self) -> &mut [ABB<S, C>] {
         &mut self.bbs[..]
+    }
+
+    #[inline(always)]
+    pub fn labels(&self) -> &Map<String, usize> {
+        &self.labels
     }
 
     pub fn labels_of_bb(&self, bbid: BbId) -> impl Iterator<Item = &str> {
