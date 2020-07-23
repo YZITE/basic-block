@@ -14,25 +14,13 @@ use core::mem::{drop, take};
 /// otherwise, remove every occurence of $key if possible,
 /// panic otherwise (especially if otherwise invariants would be violated)
 ///
-/// after applying $key->$target, do
-/// ```do_ignore
-///   let mut t = &mut $trm[$i].target;
-///   *t -= $trm[*t].offset;
-/// ```
-///
 /// To avoid reallocations and multiple intermediate data types,
 /// this structure goes through multiple stages, which contain
 /// similiar, but not equivalent sets of data.
-/// $offset is calculated at a different stage than $target,
-/// and shouldn't be trusted earlier.
 #[derive(Clone)]
 struct TransInfo {
     /// for $key->$target search-and-replace; default = $key
     target: usize,
-
-    /// offset correction for $key ($target -= $target.$offset) to
-    /// accomodate removed BBs
-    offset: Option<usize>,
 
     /// references from $i pointing to $key,
     /// useful for optimizations which rely on the fact that only
@@ -46,7 +34,6 @@ impl TransInfo {
     fn new(id: usize) -> Self {
         Self {
             target: id,
-            offset: None,
             refs: BTreeSet::new(),
         }
     }
@@ -72,12 +59,10 @@ where
     C: ForeachTarget<JumpTarget = BbId>,
 {
     pub fn optimize(&mut self) -> bool {
-        let mut max = self.bbs.len();
-        let mut new_in_use = Vec::with_capacity(max);
+        let mut new_in_use = Vec::with_capacity(self.bbs.len());
+        let mut trm: Map<BbId, Option<TransInfo>> = Map::new();
 
-        let mut trm: Map<BbId, TransInfo> = (0..max).map(|i| (i, TransInfo::new(i))).collect();
-
-        for (from, i) in self.bbs.iter().enumerate() {
+        for (&from, i) in self.bbs.iter() {
             if i.is_public {
                 new_in_use.push(from);
             } else if let BasicBlockInner::Concrete {
@@ -88,13 +73,11 @@ where
             {
                 if statements.is_empty() && condjmp.is_none() {
                     if let jump::Unconditional::Jump(trg) = *next {
-                        let tmp_max = core::cmp::max(from, trg);
-                        if max < tmp_max {
-                            max = tmp_max;
-                        }
                         if from != trg {
                             trm.entry(from)
-                                .or_insert_with(|| TransInfo::new(from))
+                                .or_insert_with(|| Some(TransInfo::new(from)))
+                                .as_mut()
+                                .unwrap()
                                 .target = trg;
                         }
                     }
@@ -106,22 +89,29 @@ where
         let mut in_use = BTreeSet::new();
         while !new_in_use.is_empty() {
             for i in take(&mut new_in_use) {
-                if in_use.insert(i) {
-                    // really new entry
-                    self.bbs[i].foreach_target(|&trg| {
-                        trm.entry(trg)
-                            .or_insert_with(|| TransInfo::new(trg))
-                            .refs
-                            .insert(i);
-                        new_in_use.push(trg);
-                    });
+                if let Some(ent) = self.bbs.get(&i) {
+                    if in_use.insert(i) {
+                        // really new entry
+                        ent.foreach_target(|&trg| {
+                            trm.entry(trg)
+                                .or_insert_with(|| Some(TransInfo::new(trg)))
+                                .as_mut()
+                                .unwrap()
+                                .refs
+                                .insert(i);
+                            new_in_use.push(trg);
+                        });
+                    }
                 }
             }
         }
         drop(new_in_use);
 
         // check all references for one-refs (which may be mergable)
-        for (&n, ti) in trm.iter() {
+        for (n, ti) in trm
+            .iter()
+            .filter_map(|(&n, ti)| ti.as_ref().map(|ti2| (n, ti2)))
+        {
             if ti.refs.len() != 1 {
                 continue;
             }
@@ -129,12 +119,17 @@ where
             if bbheadref == n {
                 continue;
             }
-            if trm.get(&bbheadref).map(|hti| hti.target != bbheadref) == Some(true) {
+            if trm
+                .get(&bbheadref)
+                .and_then(Option::as_ref)
+                .map(|hti| hti.target != bbheadref)
+                == Some(true)
+            {
                 // head is already redirected, skip
                 continue;
             }
             let mut is_mergable = false;
-            if let Some(bbhead) = self.bbs.get_mut(bbheadref) {
+            if let Some(bbhead) = self.bbs.get_mut(&bbheadref) {
                 if let BasicBlockInner::Concrete {
                     statements,
                     condjmp,
@@ -150,7 +145,7 @@ where
             if !is_mergable {
                 continue;
             }
-            let bbtail = if let Some(bbtail) = self.bbs.get_mut(n) {
+            let bbtail = if let Some(bbtail) = self.bbs.get_mut(&n) {
                 if bbtail.is_public || !bbtail.inner.is_concrete() {
                     continue;
                 }
@@ -174,13 +169,13 @@ where
                     statements: ref mut h_statements,
                     condjmp: ref mut h_condjmp,
                     next: ref mut h_next,
-                } = &mut self.bbs.get_mut(bbheadref).unwrap().inner
+                } = &mut self.bbs.get_mut(&bbheadref).unwrap().inner
                 {
                     in_use.remove(&n);
                     if h_statements.is_empty() {
                         // this normally only happens if $head.is_public
                         // merge labels manually
-                        for (_, ltrg) in self.labels.iter_mut() {
+                        for ltrg in self.labels.values_mut() {
                             if *ltrg == n {
                                 *ltrg = bbheadref;
                             }
@@ -197,64 +192,65 @@ where
             }
         }
 
-        // calculate offsets, apply in_use
-        let mut offset: BbId = 0;
+        // apply in_use
         let mut modified = false;
-        assert!(max >= self.bbs.len());
-        for i in 0..self.bbs.len() {
-            if in_use.contains(&i) {
-                let e = trm.get_mut(&i).unwrap();
-                if i != e.target {
-                    modified = true;
+        for i in self.bbs.keys() {
+            let e = trm.entry(*i);
+            if in_use.contains(i) {
+                if let alloc::collections::btree_map::Entry::Occupied(mut e) = e {
+                    if let Some(ti) = e.get_mut() {
+                        if *i != ti.target {
+                            modified = true;
+                        } else {
+                            e.remove_entry();
+                        }
+                    }
                 }
-                e.offset = Some(offset);
             } else {
-                trm.remove(&i);
-                offset += 1;
+                *e.or_default() = None;
+                modified = true;
             }
         }
-        if offset == 0 && !modified {
+        if !modified {
             // nothing left to do, we are done
             return false;
         }
-        // avoid repetition + re-execution of `unwrap_or(TransInfo::new(...))...`
-        for i in self.bbs.len()..max {
-            trm.entry(i).or_insert_with(|| TransInfo::new(i)).offset = Some(offset);
-        }
-
-        // finalize trm, apply offset correction to each $target
-        for i in 0..max {
-            if let Some(ti) = trm.get_mut(&i) {
-                if i == ti.target {
-                    ti.target -= ti.offset.unwrap();
-                } else {
-                    let old_target = ti.target;
-                    let new_target = old_target - trm.get(&old_target).unwrap().offset.unwrap();
-                    trm.get_mut(&i).unwrap().target = new_target;
-                }
-            }
-        }
-
-        let trm_get = |n: usize| trm.get(&n).map(|ti| ti.target);
 
         // remove to-be-removed BBs
-        for n in (0..max).rev() {
-            if trm.get(&n).is_none() {
-                self.bbs.remove(n);
+        {
+            let mut it = trm.iter().filter(|x| x.1.is_none()).map(|x| x.0);
+            if let Some(&nfi) = it.next() {
+                if nfi < self.cache_ins_start {
+                    self.cache_ins_start = nfi;
+                }
+                self.bbs.remove(&nfi);
+                for n in it {
+                    self.bbs.remove(&n);
+                }
             }
         }
 
         // replace jump targets
-        self.bbs.foreach_target_mut(|target: &mut usize| {
-            *target = trm_get(*target).expect("violated invariant");
-        });
+        for i in self.bbs.values_mut() {
+            i.foreach_target_mut(|target| {
+                if let Some(Some(ti)) = trm.get(target) {
+                    *target = ti.target;
+                }
+            });
+        }
 
         self.labels = take(&mut self.labels)
             .into_iter()
-            .filter(|(_, bbid)| {
+            .filter_map(|(label, bbid)| {
                 // remove all labels which point to a BBID which should be deleted,
                 // either because it is marked in trm -> None, or the BBID is invalid.
-                trm.get(bbid).is_some()
+                // update all remaining labels
+                match trm.get(&bbid) {
+                    Some(None) => None,
+                    Some(Some(ti)) => Some(ti.target),
+                    None => Some(bbid),
+                }
+                .map(|nn| (label, nn))
             })
             .collect();
 
