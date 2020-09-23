@@ -221,9 +221,7 @@ where
 
         // replace jump targets
         for i in self.bbs.values_mut() {
-            // I don't know why, but type-inference isn't working here...
-            let i: &mut BasicBlockInner<_, _, _> = &mut *i;
-            for target in i.into_trgs_iter() {
+            for target in (&mut i.inner).into_trgs_iter() {
                 if let Some(Some(ti)) = trm.get(target) {
                     *target = ti.target;
                 }

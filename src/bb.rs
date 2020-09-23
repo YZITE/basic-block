@@ -27,20 +27,12 @@ impl<S, C, T> Default for BasicBlockInner<S, C, T> {
 impl<S, C, T> BasicBlockInner<S, C, T> {
     #[inline(always)]
     pub fn is_concrete(&self) -> bool {
-        if let Self::Concrete { .. } = self {
-            true
-        } else {
-            false
-        }
+        matches!(self, Self::Concrete { .. })
     }
 
     #[inline(always)]
     pub fn is_placeholder(&self) -> bool {
-        if let Self::Placeholder { .. } = self {
-            true
-        } else {
-            false
-        }
+        matches!(self, Self::Placeholder { .. })
     }
 }
 
@@ -52,31 +44,34 @@ pub struct BasicBlock<S, C, T> {
     pub is_public: bool,
 }
 
+type ItiWrap<Sr, Cr, Tr, Sslc, Copt> = iter::Flatten<
+    core::option::IntoIter<
+        iter::Chain<
+            iter::Chain<
+                iter::FlatMap<
+                    Sslc,
+                    <Sr as IntoTargetsIter>::IntoTrgsIter,
+                    fn(Sr) -> <Sr as IntoTargetsIter>::IntoTrgsIter,
+                >,
+                iter::FlatMap<
+                    Copt,
+                    <Cr as IntoTargetsIter>::IntoTrgsIter,
+                    fn(Cr) -> <Cr as IntoTargetsIter>::IntoTrgsIter,
+                >,
+            >,
+            core::option::IntoIter<Tr>,
+        >,
+    >,
+>;
+
 impl<'a, S: 'a, C: 'a, T: 'a> IntoTargetsIter for &'a BasicBlockInner<S, C, T>
 where
     &'a S: IntoTargetsIter<Target = &'a T>,
     &'a C: IntoTargetsIter<Target = &'a T>,
 {
     type Target = &'a T;
-    type IntoTrgsIter = iter::Flatten<
-        core::option::IntoIter<
-            iter::Chain<
-                iter::Chain<
-                    iter::FlatMap<
-                        core::slice::Iter<'a, S>,
-                        <&'a S as IntoTargetsIter>::IntoTrgsIter,
-                        fn(&'a S) -> <&'a S as IntoTargetsIter>::IntoTrgsIter,
-                    >,
-                    iter::FlatMap<
-                        core::option::Iter<'a, C>,
-                        <&'a C as IntoTargetsIter>::IntoTrgsIter,
-                        fn(&'a C) -> <&'a C as IntoTargetsIter>::IntoTrgsIter,
-                    >,
-                >,
-                core::option::IntoIter<&'a T>,
-            >,
-        >,
-    >;
+    type IntoTrgsIter =
+        ItiWrap<&'a S, &'a C, &'a T, core::slice::Iter<'a, S>, core::option::Iter<'a, C>>;
 
     fn into_trgs_iter(self) -> Self::IntoTrgsIter {
         if let BasicBlockInner::Concrete {
@@ -87,12 +82,12 @@ where
         {
             Some(
                 statements
-                    .into_iter()
+                    .iter()
                     .flat_map(
                         IntoTargetsIter::into_trgs_iter
                             as fn(&'a S) -> <&'a S as IntoTargetsIter>::IntoTrgsIter,
                     )
-                    .chain(condjmp.into_iter().flat_map(
+                    .chain(condjmp.iter().flat_map(
                         IntoTargetsIter::into_trgs_iter
                             as fn(&'a C) -> <&'a C as IntoTargetsIter>::IntoTrgsIter,
                     ))
@@ -112,24 +107,12 @@ where
     &'a mut C: IntoTargetsIter<Target = &'a mut T>,
 {
     type Target = &'a mut T;
-    type IntoTrgsIter = iter::Flatten<
-        core::option::IntoIter<
-            iter::Chain<
-                iter::Chain<
-                    iter::FlatMap<
-                        core::slice::IterMut<'a, S>,
-                        <&'a mut S as IntoTargetsIter>::IntoTrgsIter,
-                        fn(&'a mut S) -> <&'a mut S as IntoTargetsIter>::IntoTrgsIter,
-                    >,
-                    iter::FlatMap<
-                        core::option::IterMut<'a, C>,
-                        <&'a mut C as IntoTargetsIter>::IntoTrgsIter,
-                        fn(&'a mut C) -> <&'a mut C as IntoTargetsIter>::IntoTrgsIter,
-                    >,
-                >,
-                core::option::IntoIter<&'a mut T>,
-            >,
-        >,
+    type IntoTrgsIter = ItiWrap<
+        &'a mut S,
+        &'a mut C,
+        &'a mut T,
+        core::slice::IterMut<'a, S>,
+        core::option::IterMut<'a, C>,
     >;
 
     fn into_trgs_iter(self) -> Self::IntoTrgsIter {
@@ -141,12 +124,12 @@ where
         {
             Some(
                 statements
-                    .into_iter()
+                    .iter_mut()
                     .flat_map(
                         IntoTargetsIter::into_trgs_iter
                             as fn(&'a mut S) -> <&'a mut S as IntoTargetsIter>::IntoTrgsIter,
                     )
-                    .chain(condjmp.into_iter().flat_map(
+                    .chain(condjmp.iter_mut().flat_map(
                         IntoTargetsIter::into_trgs_iter
                             as fn(&'a mut C) -> <&'a mut C as IntoTargetsIter>::IntoTrgsIter,
                     ))

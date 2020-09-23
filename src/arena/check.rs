@@ -4,7 +4,7 @@ fn check_finish(mut offending: Vec<(BbId, BbId)>) -> Result<(), OffendingIds> {
     if offending.is_empty() {
         Ok(())
     } else {
-        offending.sort();
+        offending.sort_unstable();
         offending.dedup();
         offending.shrink_to_fit();
         Err(OffendingIds(offending))
