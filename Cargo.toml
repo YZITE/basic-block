@@ -1,7 +1,7 @@
 [package]
 name = "yz-basic-block"
 description = "a simple Basic Block framework + optimizer"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Erik Zscheile <zseri.devel@ytrizja.de>"]
 edition = "2018"
 license = "MIT OR Apache-2.0"

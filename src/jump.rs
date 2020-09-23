@@ -16,85 +16,55 @@ pub enum Unconditional<T> {
 #[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
 pub struct Dummy<T>(pub core::marker::PhantomData<T>);
 
-pub trait ForeachTarget {
-    type JumpTarget;
+pub trait IntoTargetsIter {
+    type Target;
+    type IntoTrgsIter: Iterator<Item = Self::Target>;
 
-    fn foreach_target<F>(&self, f: F)
-    where
-        F: FnMut(&Self::JumpTarget);
-
-    fn foreach_target_mut<F>(&mut self, f: F)
-    where
-        F: FnMut(&mut Self::JumpTarget);
+    fn into_trgs_iter(self) -> Self::IntoTrgsIter;
 }
 
-impl<T> ForeachTarget for Dummy<T> {
-    type JumpTarget = T;
-
-    #[inline]
-    fn foreach_target<F>(&self, _f: F)
-    where
-        F: FnMut(&Self::JumpTarget),
-    {
-    }
-
-    #[inline]
-    fn foreach_target_mut<F>(&mut self, _f: F)
-    where
-        F: FnMut(&mut Self::JumpTarget),
-    {
+impl<'a, T> IntoTargetsIter for &'a Dummy<T> {
+    type Target = &'a T;
+    type IntoTrgsIter = iter::Empty<&'a T>;
+    #[inline(always)]
+    fn into_trgs_iter(self) -> Self::IntoTrgsIter {
+        iter::empty()
     }
 }
 
-impl<T> ForeachTarget for Unconditional<T> {
-    type JumpTarget = T;
+impl<'a, T> IntoTargetsIter for &'a mut Dummy<T> {
+    type Target = &'a mut T;
+    type IntoTrgsIter = iter::Empty<&'a mut T>;
+    #[inline(always)]
+    fn into_trgs_iter(self) -> Self::IntoTrgsIter {
+        iter::empty()
+    }
+}
 
+impl<'a, T> IntoTargetsIter for &'a Unconditional<T> {
+    type Target = &'a T;
+    type IntoTrgsIter = core::option::IntoIter<&'a T>;
     #[inline]
-    fn foreach_target<F>(&self, mut f: F)
-    where
-        F: FnMut(&Self::JumpTarget),
-    {
+    fn into_trgs_iter(self) -> Self::IntoTrgsIter {
         if let Unconditional::Jump(t) = self {
-            f(t);
+            Some(t)
+        } else {
+            None
         }
-    }
-
-    #[inline]
-    fn foreach_target_mut<F>(&mut self, mut f: F)
-    where
-        F: FnMut(&mut Self::JumpTarget),
-    {
-        if let Unconditional::Jump(t) = self {
-            f(t);
-        }
+        .into_iter()
     }
 }
 
-impl<C, T> ForeachTarget for C
-where
-    for<'a> &'a C: iter::IntoIterator<Item = &'a T>,
-    for<'a> &'a mut C: iter::IntoIterator<Item = &'a mut T>,
-    T: ForeachTarget,
-{
-    type JumpTarget = T::JumpTarget;
-
+impl<'a, T> IntoTargetsIter for &'a mut Unconditional<T> {
+    type Target = &'a mut T;
+    type IntoTrgsIter = core::option::IntoIter<&'a mut T>;
     #[inline]
-    fn foreach_target<F>(&self, mut f: F)
-    where
-        F: FnMut(&Self::JumpTarget),
-    {
-        for i in self {
-            i.foreach_target(&mut f);
+    fn into_trgs_iter(self) -> Self::IntoTrgsIter {
+        if let Unconditional::Jump(t) = self {
+            Some(t)
+        } else {
+            None
         }
-    }
-
-    #[inline]
-    fn foreach_target_mut<F>(&mut self, mut f: F)
-    where
-        F: FnMut(&mut Self::JumpTarget),
-    {
-        for i in self {
-            i.foreach_target_mut(&mut f);
-        }
+        .into_iter()
     }
 }

@@ -13,14 +13,14 @@ fn check_finish(mut offending: Vec<(BbId, BbId)>) -> Result<(), OffendingIds> {
 
 impl<S, C> Arena<S, C>
 where
-    ABB<S, C>: ForeachTarget<JumpTarget = BbId>,
+    for<'a> &'a BasicBlockInner<S, C, BbId>: IntoTargetsIter<Target = &'a BbId>,
 {
     fn check_intern(&self, bbid: BbId, bb: &ABB<S, C>, offending: &mut Vec<(BbId, BbId)>) {
-        bb.foreach_target(|&t| {
+        for &t in bb.into_trgs_iter() {
             if t != bbid && self.bbs.get(&t).is_none() {
                 offending.push((bbid, t));
             }
-        });
+        }
     }
 
     fn check_bbs(&self) -> Vec<(BbId, BbId)> {

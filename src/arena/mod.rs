@@ -1,5 +1,5 @@
 use crate::bb::{BasicBlock, BasicBlockInner};
-use crate::jump::ForeachTarget;
+use crate::jump::IntoTargetsIter;
 use crate::{BbId, Label};
 use alloc::collections::{btree_map::Entry as MapEntry, BTreeMap as Map};
 use alloc::{string::String, vec::Vec};
@@ -18,7 +18,7 @@ type LabelMap = Map<String, BbId>;
 #[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
 pub struct Arena<S, C> {
     // invariant: every pointer to another BB should be valid inside the arena.
-    bbs: Map<BbId, ABB<S, C>>,
+    pub bbs: Map<BbId, ABB<S, C>>,
     labels: LabelMap,
 
     // cache earliest insert point, used to speed up 'push' calls.
@@ -105,16 +105,6 @@ impl<S, C> Arena<S, C> {
     }
 
     #[inline(always)]
-    pub fn bbs(&self) -> &Map<BbId, ABB<S, C>> {
-        &self.bbs
-    }
-
-    #[inline(always)]
-    pub fn bbs_mut(&mut self) -> &mut Map<BbId, ABB<S, C>> {
-        &mut self.bbs
-    }
-
-    #[inline(always)]
     pub fn labels(&self) -> &LabelMap {
         &self.labels
     }
@@ -152,37 +142,6 @@ impl<S, C> Arena<S, C> {
             if let BasicBlockInner::Concrete { statements, .. } = &mut i.inner {
                 statements.shrink_to_fit();
             }
-        }
-    }
-}
-
-impl<S, C> ForeachTarget for Arena<S, C>
-where
-    ABB<S, C>: ForeachTarget<JumpTarget = BbId>,
-{
-    type JumpTarget = BbId;
-
-    fn foreach_target<F>(&self, mut f: F)
-    where
-        F: FnMut(&Self::JumpTarget),
-    {
-        for i in self.bbs.values() {
-            i.foreach_target(&mut f);
-        }
-        for i in self.labels.values() {
-            f(i);
-        }
-    }
-
-    fn foreach_target_mut<F>(&mut self, mut f: F)
-    where
-        F: FnMut(&mut Self::JumpTarget),
-    {
-        for i in self.bbs.values_mut() {
-            i.foreach_target_mut(&mut f);
-        }
-        for i in self.labels.values_mut() {
-            f(i);
         }
     }
 }

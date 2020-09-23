@@ -1,6 +1,6 @@
 use super::Arena;
 use crate::bb::BasicBlockInner;
-use crate::jump::{self, ForeachTarget};
+use crate::jump::{self, IntoTargetsIter};
 use crate::BbId;
 use alloc::collections::{BTreeMap as Map, BTreeSet};
 use alloc::vec::Vec;
@@ -39,24 +39,12 @@ impl TransInfo {
     }
 }
 
-/// check function which makes sure that no reference to $exclude exists
-/// inside of $container.
-fn fetchk<C>(is_mergable: &mut bool, container: &C, exclude: <C as ForeachTarget>::JumpTarget)
-where
-    C: ForeachTarget,
-    C::JumpTarget: Copy + PartialEq,
-{
-    container.foreach_target(move |&t| {
-        if exclude == t {
-            *is_mergable = false;
-        }
-    });
-}
-
 impl<S, C> Arena<S, C>
 where
-    S: ForeachTarget<JumpTarget = BbId>,
-    C: ForeachTarget<JumpTarget = BbId>,
+    for<'a> &'a BasicBlockInner<S, C, BbId>: IntoTargetsIter<Target = &'a BbId>,
+    for<'a> &'a mut BasicBlockInner<S, C, BbId>: IntoTargetsIter<Target = &'a mut BbId>,
+    for<'a> &'a S: IntoTargetsIter<Target = &'a BbId>,
+    for<'a> &'a mut S: IntoTargetsIter<Target = &'a mut BbId>,
 {
     pub fn optimize(&mut self) -> bool {
         let mut new_in_use = Vec::with_capacity(self.bbs.len());
@@ -92,15 +80,14 @@ where
                 if let Some(ent) = self.bbs.get(&i) {
                     if in_use.insert(i) {
                         // really new entry
-                        ent.foreach_target(|&trg| {
+                        new_in_use.extend(ent.into_trgs_iter().copied().inspect(|&trg| {
                             trm.entry(trg)
                                 .or_insert_with(|| Some(TransInfo::new(trg)))
                                 .as_mut()
                                 .unwrap()
                                 .refs
                                 .insert(i);
-                            new_in_use.push(trg);
-                        });
+                        }));
                     }
                 }
             }
@@ -136,10 +123,13 @@ where
                     next,
                 } = &mut bbhead.inner
                 {
-                    is_mergable = condjmp.is_none() && *next == jump::Unconditional::Jump(n);
-
                     // make sure that we don't have any additional references to bbtail
-                    fetchk(&mut is_mergable, statements, n);
+                    is_mergable = condjmp.is_none()
+                        && *next == jump::Unconditional::Jump(n)
+                        && !statements
+                            .iter()
+                            .flat_map(|x| x.into_trgs_iter())
+                            .any(|t| n == *t);
                 }
             }
             if !is_mergable {
@@ -149,8 +139,7 @@ where
                 if bbtail.is_public || !bbtail.inner.is_concrete() {
                     continue;
                 }
-                fetchk(&mut is_mergable, bbtail, n);
-                if !is_mergable {
+                if bbtail.into_trgs_iter().any(|t| n == *t) {
                     continue;
                 }
                 take(&mut bbtail.inner)
@@ -232,11 +221,13 @@ where
 
         // replace jump targets
         for i in self.bbs.values_mut() {
-            i.foreach_target_mut(|target| {
+            // I don't know why, but type-inference isn't working here...
+            let i: &mut BasicBlockInner<_, _, _> = &mut *i;
+            for target in i.into_trgs_iter() {
                 if let Some(Some(ti)) = trm.get(target) {
                     *target = ti.target;
                 }
-            });
+            }
         }
 
         self.labels = take(&mut self.labels)

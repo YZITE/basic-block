@@ -1,5 +1,6 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 #![forbid(unsafe_code)]
+#![recursion_limit = "100"]
 
 extern crate alloc;
 extern crate core;

@@ -43,7 +43,7 @@ fn bb1() {
     arena.check().unwrap();
     arena.optimize();
     assert_eq!(arena.len(), 1);
-    arena.bbs_mut().get_mut(&0).unwrap().is_public = false;
+    arena.bbs.get_mut(&0).unwrap().is_public = false;
     arena.check().unwrap();
     arena.optimize();
     assert_eq!(arena.len(), 0);
@@ -76,21 +76,19 @@ struct LolCondJmp<T> {
     target: T,
 }
 
-impl<T> yz_basic_block::jump::ForeachTarget for LolCondJmp<T> {
-    type JumpTarget = T;
-
-    fn foreach_target<F>(&self, mut f: F)
-    where
-        F: FnMut(&Self::JumpTarget),
-    {
-        f(&self.target);
+impl<'a, T> yz_basic_block::jump::IntoTargetsIter for &'a LolCondJmp<T> {
+    type Target = &'a T;
+    type IntoTrgsIter = core::iter::Once<&'a T>;
+    fn into_trgs_iter(self) -> Self::IntoTrgsIter {
+        core::iter::once(&self.target)
     }
+}
 
-    fn foreach_target_mut<F>(&mut self, mut f: F)
-    where
-        F: FnMut(&mut Self::JumpTarget),
-    {
-        f(&mut self.target);
+impl<'a, T> yz_basic_block::jump::IntoTargetsIter for &'a mut LolCondJmp<T> {
+    type Target = &'a mut T;
+    type IntoTrgsIter = core::iter::Once<&'a mut T>;
+    fn into_trgs_iter(self) -> Self::IntoTrgsIter {
+        core::iter::once(&mut self.target)
     }
 }
 
@@ -119,9 +117,7 @@ fn bb_keep() {
     });
     assert!(pr.is_ok());
 
-    if let BasicBlockInner::Concrete { condjmp, .. } =
-        &mut arena.bbs_mut().get_mut(&0).unwrap().inner
-    {
+    if let BasicBlockInner::Concrete { condjmp, .. } = &mut arena.bbs.get_mut(&0).unwrap().inner {
         // link both BBs together
         *condjmp = Some(LolCondJmp { target: 1 });
     }
@@ -163,8 +159,7 @@ fn bb_merge() {
     });
     assert!(pr.is_ok());
 
-    if let BasicBlockInner::Concrete { next, .. } = &mut arena.bbs_mut().get_mut(&0).unwrap().inner
-    {
+    if let BasicBlockInner::Concrete { next, .. } = &mut arena.bbs.get_mut(&0).unwrap().inner {
         // link both BBs together
         *next = Unconditional::Jump(1);
     }
@@ -178,7 +173,7 @@ fn bb_merge() {
     assert_eq!(arena.len(), 1);
     assert!(arena.check().is_ok());
 
-    if let BasicBlockInner::Concrete { next, .. } = &arena.bbs()[&0].inner {
+    if let BasicBlockInner::Concrete { next, .. } = &arena.bbs[&0].inner {
         assert_eq!(*next, Unconditional::Return);
     } else {
         unreachable!();

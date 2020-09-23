@@ -1,5 +1,6 @@
-use crate::jump::{self, ForeachTarget};
+use crate::jump::{self, IntoTargetsIter};
 use alloc::vec::Vec;
+use core::iter;
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -24,7 +25,7 @@ impl<S, C, T> Default for BasicBlockInner<S, C, T> {
 }
 
 impl<S, C, T> BasicBlockInner<S, C, T> {
-    #[inline]
+    #[inline(always)]
     pub fn is_concrete(&self) -> bool {
         if let Self::Concrete { .. } = self {
             true
@@ -33,7 +34,7 @@ impl<S, C, T> BasicBlockInner<S, C, T> {
         }
     }
 
-    #[inline]
+    #[inline(always)]
     pub fn is_placeholder(&self) -> bool {
         if let Self::Placeholder { .. } = self {
             true
@@ -51,66 +52,128 @@ pub struct BasicBlock<S, C, T> {
     pub is_public: bool,
 }
 
-impl<S, C, T> ForeachTarget for BasicBlockInner<S, C, T>
+impl<'a, S: 'a, C: 'a, T: 'a> IntoTargetsIter for &'a BasicBlockInner<S, C, T>
 where
-    S: ForeachTarget<JumpTarget = T>,
-    C: ForeachTarget<JumpTarget = T>,
+    &'a S: IntoTargetsIter<Target = &'a T>,
+    &'a C: IntoTargetsIter<Target = &'a T>,
 {
-    type JumpTarget = T;
+    type Target = &'a T;
+    type IntoTrgsIter = iter::Flatten<
+        core::option::IntoIter<
+            iter::Chain<
+                iter::Chain<
+                    iter::FlatMap<
+                        core::slice::Iter<'a, S>,
+                        <&'a S as IntoTargetsIter>::IntoTrgsIter,
+                        fn(&'a S) -> <&'a S as IntoTargetsIter>::IntoTrgsIter,
+                    >,
+                    iter::FlatMap<
+                        core::option::Iter<'a, C>,
+                        <&'a C as IntoTargetsIter>::IntoTrgsIter,
+                        fn(&'a C) -> <&'a C as IntoTargetsIter>::IntoTrgsIter,
+                    >,
+                >,
+                core::option::IntoIter<&'a T>,
+            >,
+        >,
+    >;
 
-    fn foreach_target<F>(&self, mut f: F)
-    where
-        F: FnMut(&Self::JumpTarget),
-    {
+    fn into_trgs_iter(self) -> Self::IntoTrgsIter {
         if let BasicBlockInner::Concrete {
             statements,
             condjmp,
             next,
         } = self
         {
-            statements.foreach_target(&mut f);
-            condjmp.foreach_target(&mut f);
-            next.foreach_target(f);
+            Some(
+                statements
+                    .into_iter()
+                    .flat_map(
+                        IntoTargetsIter::into_trgs_iter
+                            as fn(&'a S) -> <&'a S as IntoTargetsIter>::IntoTrgsIter,
+                    )
+                    .chain(condjmp.into_iter().flat_map(
+                        IntoTargetsIter::into_trgs_iter
+                            as fn(&'a C) -> <&'a C as IntoTargetsIter>::IntoTrgsIter,
+                    ))
+                    .chain(next.into_trgs_iter()),
+            )
+        } else {
+            None
         }
-    }
-
-    fn foreach_target_mut<F>(&mut self, mut f: F)
-    where
-        F: FnMut(&mut Self::JumpTarget),
-    {
-        if let BasicBlockInner::Concrete {
-            statements,
-            condjmp,
-            next,
-        } = self
-        {
-            statements.foreach_target_mut(&mut f);
-            condjmp.foreach_target_mut(&mut f);
-            next.foreach_target_mut(f);
-        }
+        .into_iter()
+        .flatten()
     }
 }
 
-impl<S, C, T> ForeachTarget for BasicBlock<S, C, T>
+impl<'a, S: 'a, C: 'a, T: 'a> IntoTargetsIter for &'a mut BasicBlockInner<S, C, T>
 where
-    S: ForeachTarget<JumpTarget = T>,
-    C: ForeachTarget<JumpTarget = T>,
+    &'a mut S: IntoTargetsIter<Target = &'a mut T>,
+    &'a mut C: IntoTargetsIter<Target = &'a mut T>,
 {
-    type JumpTarget = T;
+    type Target = &'a mut T;
+    type IntoTrgsIter = iter::Flatten<
+        core::option::IntoIter<
+            iter::Chain<
+                iter::Chain<
+                    iter::FlatMap<
+                        core::slice::IterMut<'a, S>,
+                        <&'a mut S as IntoTargetsIter>::IntoTrgsIter,
+                        fn(&'a mut S) -> <&'a mut S as IntoTargetsIter>::IntoTrgsIter,
+                    >,
+                    iter::FlatMap<
+                        core::option::IterMut<'a, C>,
+                        <&'a mut C as IntoTargetsIter>::IntoTrgsIter,
+                        fn(&'a mut C) -> <&'a mut C as IntoTargetsIter>::IntoTrgsIter,
+                    >,
+                >,
+                core::option::IntoIter<&'a mut T>,
+            >,
+        >,
+    >;
 
-    #[inline(always)]
-    fn foreach_target<F>(&self, f: F)
-    where
-        F: FnMut(&Self::JumpTarget),
-    {
-        self.inner.foreach_target(f);
+    fn into_trgs_iter(self) -> Self::IntoTrgsIter {
+        if let BasicBlockInner::Concrete {
+            statements,
+            condjmp,
+            next,
+        } = self
+        {
+            Some(
+                statements
+                    .into_iter()
+                    .flat_map(
+                        IntoTargetsIter::into_trgs_iter
+                            as fn(&'a mut S) -> <&'a mut S as IntoTargetsIter>::IntoTrgsIter,
+                    )
+                    .chain(condjmp.into_iter().flat_map(
+                        IntoTargetsIter::into_trgs_iter
+                            as fn(&'a mut C) -> <&'a mut C as IntoTargetsIter>::IntoTrgsIter,
+                    ))
+                    .chain(next.into_trgs_iter()),
+            )
+        } else {
+            None
+        }
+        .into_iter()
+        .flatten()
     }
+}
+
+// simplify trait impls by a bit of cheating...
+
+impl<S, C, T> core::ops::Deref for BasicBlock<S, C, T> {
+    type Target = BasicBlockInner<S, C, T>;
 
     #[inline(always)]
-    fn foreach_target_mut<F>(&mut self, f: F)
-    where
-        F: FnMut(&mut Self::JumpTarget),
-    {
-        self.inner.foreach_target_mut(f);
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl<S, C, T> core::ops::DerefMut for BasicBlock<S, C, T> {
+    #[inline(always)]
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner
     }
 }
