@@ -76,21 +76,21 @@ where
         // recursively mark anything as in-use only if reachable from in-use or pub
         let mut in_use = BTreeSet::new();
         while !new_in_use.is_empty() {
-            for i in take(&mut new_in_use) {
-                if let Some(ent) = self.bbs.get(&i) {
-                    if in_use.insert(i) {
-                        // really new entry
-                        new_in_use.extend(ent.into_trgs_iter().copied().inspect(|&trg| {
-                            trm.entry(trg)
-                                .or_insert_with(|| Some(TransInfo::new(trg)))
-                                .as_mut()
-                                .unwrap()
-                                .refs
-                                .insert(i);
-                        }));
-                    }
-                }
-            }
+            new_in_use = take(&mut new_in_use)
+                .into_iter()
+                .filter_map(|i| self.bbs.get(&i).map(|ent| (i, ent)))
+                .filter(|i| in_use.insert(i.0)) // check if entry is really new
+                .flat_map(|(i, ent)| ent.into_trgs_iter().map(move |&trg| (i, trg)))
+                .inspect(|&(i, trg)| {
+                    trm.entry(trg)
+                        .or_insert_with(|| Some(TransInfo::new(trg)))
+                        .as_mut()
+                        .unwrap()
+                        .refs
+                        .insert(i);
+                })
+                .map(|(_, trg)| trg)
+                .collect();
         }
         drop(new_in_use);
 
@@ -104,6 +104,7 @@ where
             }
             let bbheadref = *ti.refs.iter().next().unwrap();
             if bbheadref == n {
+                // loop / self-reference, skip
                 continue;
             }
             if trm
@@ -115,7 +116,6 @@ where
                 // head is already redirected, skip
                 continue;
             }
-            let mut is_mergable = false;
             if let Some(bbhead) = self.bbs.get_mut(&bbheadref) {
                 if let BasicBlockInner::Concrete {
                     statements,
@@ -123,61 +123,58 @@ where
                     next,
                 } = &mut bbhead.inner
                 {
-                    // make sure that we don't have any additional references to bbtail
-                    is_mergable = condjmp.is_none()
-                        && *next == jump::Unconditional::Jump(n)
-                        && !statements
+                    if condjmp.is_some()
+                        || *next != jump::Unconditional::Jump(n)
+                        || // make sure that we don't have any additional references to bbtail
+                        statements
                             .iter()
                             .flat_map(|x| x.into_trgs_iter())
-                            .any(|t| n == *t);
+                            .any(|t| n == *t)
+                    {
+                        continue;
+                    }
                 }
             }
-            if !is_mergable {
-                continue;
-            }
-            let bbtail = if let Some(bbtail) = self.bbs.get_mut(&n) {
-                if bbtail.is_public || !bbtail.inner.is_concrete() {
-                    continue;
-                }
-                if bbtail.into_trgs_iter().any(|t| n == *t) {
-                    continue;
-                }
-                take(&mut bbtail.inner)
-            } else {
-                continue;
-            };
-
-            // mergable
-            if let BasicBlockInner::Concrete {
-                mut statements,
-                condjmp,
-                next,
-            } = bbtail
-            {
-                if let BasicBlockInner::Concrete {
-                    statements: ref mut h_statements,
-                    condjmp: ref mut h_condjmp,
-                    next: ref mut h_next,
-                } = &mut self.bbs.get_mut(&bbheadref).unwrap().inner
+            if let Some(bbtail) = self.bbs.get_mut(&n) {
+                if bbtail.is_public
+                    || !bbtail.inner.is_concrete()
+                    || bbtail.into_trgs_iter().any(|t| n == *t)
                 {
-                    in_use.remove(&n);
-                    if h_statements.is_empty() {
-                        // this normally only happens if $head.is_public
-                        // merge labels manually
-                        for ltrg in self.labels.values_mut() {
-                            if *ltrg == n {
-                                *ltrg = bbheadref;
+                    continue;
+                }
+
+                // mergable
+                if let BasicBlockInner::Concrete {
+                    mut statements,
+                    condjmp,
+                    next,
+                } = take(&mut bbtail.inner)
+                {
+                    if let BasicBlockInner::Concrete {
+                        statements: ref mut h_statements,
+                        condjmp: ref mut h_condjmp,
+                        next: ref mut h_next,
+                    } = &mut self.bbs.get_mut(&bbheadref).unwrap().inner
+                    {
+                        in_use.remove(&n);
+                        if h_statements.is_empty() {
+                            // this normally only happens if $head.is_public
+                            // merge labels manually
+                            for ltrg in self.labels.values_mut() {
+                                if *ltrg == n {
+                                    *ltrg = bbheadref;
+                                }
                             }
                         }
+                        h_statements.append(&mut statements);
+                        *h_condjmp = condjmp;
+                        *h_next = next;
+                    } else {
+                        unreachable!();
                     }
-                    h_statements.append(&mut statements);
-                    *h_condjmp = condjmp;
-                    *h_next = next;
                 } else {
                     unreachable!();
                 }
-            } else {
-                unreachable!();
             }
         }
 
@@ -235,8 +232,7 @@ where
                 // either because it is marked in trm -> None, or the BBID is invalid.
                 // update all remaining labels
                 match trm.get(&bbid) {
-                    Some(None) => None,
-                    Some(Some(ti)) => Some(ti.target),
+                    Some(x) => x.as_ref().map(|ti| ti.target),
                     None => Some(bbid),
                 }
                 .map(|nn| (label, nn))

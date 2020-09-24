@@ -43,7 +43,7 @@ pub enum SetBbLabelError {
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "std", derive(thiserror::Error))]
 #[cfg_attr(feature = "std", error("got invalid basic block id {0}"))]
-pub struct InvalidId(BbId);
+pub struct InvalidId(pub BbId);
 
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "std", derive(thiserror::Error))]
