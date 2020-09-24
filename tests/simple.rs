@@ -27,9 +27,9 @@ fn bb1() {
         is_public: true,
     });
     assert!(pr.is_ok());
-    assert!(arena.set_label("main".into(), pr.unwrap(), false).is_ok());
-    assert!(arena.set_label("main".into(), 0, false).is_err());
-    assert!(arena.set_label("main".into(), 1, true).is_err());
+    assert!(arena.set_label("main".into(), pr.unwrap()).is_ok());
+    assert!(arena.set_label("main".into(), 0).is_err());
+    assert!(arena.set_label_overwrite("main".into(), 1).is_err());
     let pr = arena.push(BasicBlock {
         inner: BasicBlockInner::Concrete {
             statements: Vec::new(),
@@ -63,7 +63,7 @@ fn bb_pop() {
     });
     assert!(pr.is_ok());
     let id = pr.unwrap();
-    assert!(arena.set_label("main".into(), id, false).is_ok());
+    assert!(arena.set_label("main".into(), id).is_ok());
     if let Some(Ok(_)) = arena.remove(id) {
         // do nothing
     } else {
@@ -105,7 +105,7 @@ fn bb_keep() {
         is_public: true,
     });
     assert!(pr.is_ok());
-    assert!(arena.set_label("main".into(), pr.unwrap(), false).is_ok());
+    assert!(arena.set_label("main".into(), pr.unwrap()).is_ok());
 
     let pr = arena.push(BasicBlock {
         inner: BasicBlockInner::Concrete {
@@ -147,7 +147,7 @@ fn bb_merge() {
         is_public: true,
     });
     assert!(pr.is_ok());
-    assert!(arena.set_label("main".into(), pr.unwrap(), false).is_ok());
+    assert!(arena.set_label("main".into(), pr.unwrap()).is_ok());
 
     let pr = arena.push(BasicBlock {
         inner: BasicBlockInner::Concrete {

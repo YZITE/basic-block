@@ -42,6 +42,11 @@ pub enum SetBbLabelError {
 
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "std", derive(thiserror::Error))]
+#[cfg_attr(feature = "std", error("got invalid basic block id {0}"))]
+pub struct InvalidId(BbId);
+
+#[derive(Clone, Debug)]
+#[cfg_attr(feature = "std", derive(thiserror::Error))]
 #[cfg_attr(
     feature = "std",
     error("got offending basic block ids (from -> to) {0:?}")
@@ -65,24 +70,6 @@ fn labels_of_bb(labels: &LabelMap, bbid: BbId) -> impl Iterator<Item = &str> {
         .iter()
         .filter(move |(_, &curid)| curid == bbid)
         .map(|(label, _)| label.as_str())
-}
-
-fn set_label(
-    labels: &mut LabelMap,
-    label: String,
-    target: BbId,
-    overwrite: bool,
-) -> Result<Option<BbId>, SetBbLabelError> {
-    match labels.entry(label) {
-        MapEntry::Occupied(mut e) if overwrite => Ok(Some(replace(e.get_mut(), target))),
-        MapEntry::Occupied(e) => Err(SetBbLabelError::LabelAlreadyExists {
-            orig_target: *e.get(),
-        }),
-        MapEntry::Vacant(e) => {
-            e.insert(target);
-            Ok(None)
-        }
-    }
 }
 
 impl<S, C> Arena<S, C> {
@@ -117,18 +104,39 @@ impl<S, C> Arena<S, C> {
             .and_then(|bbid| self.bbs.get(bbid).map(move |bb| (*bbid, bb)))
     }
 
-    /// If this call replaced the current label->BB-ID association,
-    /// then the old associated BBID is returned.
-    pub fn set_label(
-        &mut self,
-        label: Label,
-        target: BbId,
-        overwrite: bool,
-    ) -> Result<Option<BbId>, SetBbLabelError> {
+    pub fn set_label(&mut self, label: Label, target: BbId) -> Result<(), SetBbLabelError> {
         if self.bbs.get(&target).is_none() {
             return Err(SetBbLabelError::InvalidId(target));
         }
-        set_label(&mut self.labels, label.into_owned(), target, overwrite)
+        match self.labels.entry(label.into_owned()) {
+            MapEntry::Occupied(e) => Err(SetBbLabelError::LabelAlreadyExists {
+                orig_target: *e.get(),
+            }),
+            MapEntry::Vacant(e) => {
+                e.insert(target);
+                Ok(())
+            }
+        }
+    }
+
+    /// If this call replaced the current label->BB-ID association,
+    /// then the old associated BBID is returned.
+    pub fn set_label_overwrite(
+        &mut self,
+        label: Label,
+        target: BbId,
+    ) -> Result<Option<BbId>, InvalidId> {
+        if self.bbs.get(&target).is_none() {
+            Err(InvalidId(target))
+        } else {
+            Ok(match self.labels.entry(label.into_owned()) {
+                MapEntry::Occupied(mut e) => Some(replace(e.get_mut(), target)),
+                MapEntry::Vacant(e) => {
+                    e.insert(target);
+                    None
+                }
+            })
+        }
     }
 
     pub fn shrink_to_fit(&mut self) {
