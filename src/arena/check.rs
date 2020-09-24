@@ -1,4 +1,5 @@
 use super::*;
+use either::Either;
 
 fn check_finish(mut offending: Vec<(BbId, BbId)>) -> Result<(), OffendingIds> {
     if offending.is_empty() {
@@ -15,50 +16,51 @@ impl<S, C> Arena<S, C>
 where
     for<'a> &'a BasicBlockInner<S, C, BbId>: IntoTargetsIter<Target = &'a BbId>,
 {
-    fn check_intern(&self, bbid: BbId, bb: &ABB<S, C>, offending: &mut Vec<(BbId, BbId)>) {
-        for &t in bb.into_trgs_iter() {
-            if t != bbid && self.bbs.get(&t).is_none() {
-                offending.push((bbid, t));
-            }
-        }
-    }
-
-    fn check_bbs(&self) -> Vec<(BbId, BbId)> {
-        let mut errs = Vec::new();
-        for (&n, i) in self.bbs.iter() {
-            self.check_intern(n, i, &mut errs);
-        }
-        errs
+    fn check_intern<'a>(
+        &'a self,
+        bbid: BbId,
+        bb: &'a ABB<S, C>,
+    ) -> impl Iterator<Item = (BbId, BbId)> + 'a {
+        bb.into_trgs_iter()
+            .copied()
+            .filter(move |t| *t != bbid && self.bbs.get(t).is_none())
+            .map(move |t| (bbid, t))
     }
 
     /// Use this method to re-check all references in the `Arena` after
-    /// modifications via [`Arena::bbs_mut`].
+    /// modifications via [`Arena::bbs`].
     pub fn check(&self) -> Result<(), OffendingIds> {
-        let mut errs = self.check_bbs();
-        // all labels should point to a valid BbId
-        errs.extend(self.labels.values().filter_map(|&i| {
-            if self.bbs.get(&i).is_none() {
-                Some((i, i))
-            } else {
-                None
-            }
-        }));
-        // all placeholders should have label(s)
-        for (&n, i) in self.bbs.iter() {
-            if i.inner.is_placeholder() && self.labels_of_bb(n).next().is_none() {
-                errs.push((n, n));
-            }
-        }
+        let errs: Vec<_> = self
+            .bbs
+            .iter()
+            .flat_map(|(&n, i)| {
+                if i.inner.is_placeholder() {
+                    // all placeholders should have label(s)
+                    Either::Left(
+                        if self.labels_of_bb(n).next().is_none() {
+                            Some((n, n))
+                        } else {
+                            None
+                        }
+                        .into_iter(),
+                    )
+                } else {
+                    Either::Right(self.check_intern(n, i))
+                }
+            })
+            .chain(
+                // all labels should point to a valid BbId
+                self.labels
+                    .values()
+                    .filter(|i| self.bbs.get(i).is_none())
+                    .map(|&i| (i, i)),
+            )
+            .collect();
         check_finish(errs)
     }
 
     fn find_first_free(&self) -> Option<usize> {
-        for i in self.cache_ins_start..usize::MAX {
-            if self.bbs.get(&i).is_none() {
-                return Some(i);
-            }
-        }
-        None
+        (self.cache_ins_start..usize::MAX).find(|i| self.bbs.get(i).is_none())
     }
 
     /// Returns the ID of the newly appended BB if successful,
@@ -68,8 +70,7 @@ where
             Some(n) => n,
             None => return Err((bb, OffendingIds(Vec::new()))),
         };
-        let mut errs = Vec::new();
-        self.check_intern(ret, &bb, &mut errs);
+        let errs: Vec<_> = self.check_intern(ret, &bb).collect();
         match check_finish(errs) {
             Ok(()) => {
                 self.bbs.insert(ret, bb);
@@ -85,7 +86,11 @@ where
     /// Otherwise, returns the offending BBs (which still reference it)
     pub fn remove(&mut self, bbid: BbId) -> Option<Result<(ABB<S, C>, Vec<String>), OffendingIds>> {
         let x = self.bbs.remove(&bbid)?;
-        let offending = self.check_bbs();
+        let offending: Vec<_> = self
+            .bbs
+            .iter()
+            .flat_map(|(&n, i)| self.check_intern(n, i))
+            .collect();
         Some(if offending.is_empty() {
             let (labelrt, rlabels) = take(&mut self.labels)
                 .into_iter()

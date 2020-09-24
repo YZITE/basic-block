@@ -61,13 +61,10 @@ impl<S, C> Default for Arena<S, C> {
 }
 
 fn labels_of_bb(labels: &LabelMap, bbid: BbId) -> impl Iterator<Item = &str> {
-    labels.iter().filter_map(move |(label, &curid)| {
-        if curid == bbid {
-            Some(label.as_str())
-        } else {
-            None
-        }
-    })
+    labels
+        .iter()
+        .filter(move |(_, &curid)| curid == bbid)
+        .map(|(label, _)| label.as_str())
 }
 
 fn set_label(
@@ -115,12 +112,9 @@ impl<S, C> Arena<S, C> {
     }
 
     pub fn label2bb(&self, label: &str) -> Option<(BbId, &ABB<S, C>)> {
-        if let Some(bbid) = self.labels.get(label) {
-            if let Some(bb) = self.bbs.get(bbid) {
-                return Some((*bbid, bb));
-            }
-        }
-        None
+        self.labels
+            .get(label)
+            .and_then(|bbid| self.bbs.get(bbid).map(move |bb| (*bbid, bb)))
     }
 
     /// If this call replaced the current label->BB-ID association,

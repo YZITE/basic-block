@@ -13,6 +13,10 @@ std = ["thiserror"]
 
 [dependencies]
 
+[dependencies.either]
+version = "1.6"
+default-features = false
+
 [dependencies.serde]
 version = "1.0"
 default-features = false
