@@ -41,10 +41,10 @@ impl TransInfo {
 
 impl<S, C> Arena<S, C>
 where
-    for<'a> &'a BasicBlockInner<S, C, BbId>: IntoTargetsIter<Target = &'a BbId>,
-    for<'a> &'a mut BasicBlockInner<S, C, BbId>: IntoTargetsIter<Target = &'a mut BbId>,
     for<'a> &'a S: IntoTargetsIter<Target = &'a BbId>,
     for<'a> &'a mut S: IntoTargetsIter<Target = &'a mut BbId>,
+    for<'a> &'a C: IntoTargetsIter<Target = &'a BbId>,
+    for<'a> &'a mut C: IntoTargetsIter<Target = &'a mut BbId>,
 {
     pub fn optimize(&mut self) -> bool {
         let mut new_in_use = Vec::with_capacity(self.bbs.len());
